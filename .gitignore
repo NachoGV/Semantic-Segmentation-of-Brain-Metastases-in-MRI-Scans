@@ -1,3 +1,9 @@
 
 # Dataset Folder
 data
+
+# Utils Imports
+__pycache__
+
+# Model outputs
+outputs
