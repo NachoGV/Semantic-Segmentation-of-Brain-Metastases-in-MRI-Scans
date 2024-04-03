@@ -1,6 +1,6 @@
 
 # Dataset Folder
-data
+data/raw
 
 # Utils Imports
 __pycache__
