@@ -12,6 +12,8 @@ from monai.transforms import (
     RandScaleIntensityd,
     RandShiftIntensityd,
     EnsureChannelFirstd,
+
+    ResizeWithPadOrCropd
 )
 
 # BraTS Annotations Transform
@@ -43,6 +45,7 @@ train_transform = Compose(
             mode=("bilinear", "nearest"),
         ),
         RandSpatialCropd(keys=["image", "label"], roi_size=[240, 240, 160], random_size=False),
+        ResizeWithPadOrCropd(keys=["image", "label"], spatial_size=(240, 240, 160)),
         RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
         RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
         RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
