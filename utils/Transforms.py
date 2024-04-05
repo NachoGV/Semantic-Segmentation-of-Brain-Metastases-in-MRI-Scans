@@ -12,7 +12,6 @@ from monai.transforms import (
     RandScaleIntensityd,
     RandShiftIntensityd,
     EnsureChannelFirstd,
-
     ResizeWithPadOrCropd
 )
 
@@ -31,41 +30,44 @@ class ConvertToMultiChannelBasedOnBratsClassesd(MapTransform):
             d[key] = torch.stack(result, axis=0).float()
         return d
     
-# Transforms Compose
-train_transform = Compose(
-    [
-        LoadImaged(keys=["image", "label"], reader="NibabelReader"),
-        EnsureChannelFirstd(keys="image"),
-        EnsureTyped(keys=["image", "label"]),
-        ConvertToMultiChannelBasedOnBratsClassesd(keys="label"),
-        Orientationd(keys=["image", "label"], axcodes="RAS"),
-        Spacingd(
-            keys=["image", "label"],
-            pixdim=(1.0, 1.0, 1.0),
-            mode=("bilinear", "nearest"),
-        ),
-        RandSpatialCropd(keys=["image", "label"], roi_size=[240, 240, 160], random_size=False),
-        ResizeWithPadOrCropd(keys=["image", "label"], spatial_size=(240, 240, 160)),
-        RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
-        RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
-        RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
-        NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
-        RandScaleIntensityd(keys="image", factors=0.1, prob=1.0),
-        RandShiftIntensityd(keys="image", offsets=0.1, prob=1.0),
-    ]
-)
-val_transform = Compose(
-    [
-        LoadImaged(keys=["image", "label"], reader="NibabelReader"),
-        EnsureChannelFirstd(keys="image"),
-        EnsureTyped(keys=["image", "label"]),
-        ConvertToMultiChannelBasedOnBratsClassesd(keys="label"),
-        Orientationd(keys=["image", "label"], axcodes="RAS"),
-        Spacingd(
-            keys=["image", "label"],
-            pixdim=(1.0, 1.0, 1.0),
-            mode=("bilinear", "nearest"),
-        ),
-        NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
-    ]
-)
+# Transforms
+class Transforms():
+    def train(spatial_size):
+        return Compose(
+            [
+            LoadImaged(keys=["image", "label"], reader="NibabelReader"),
+            EnsureChannelFirstd(keys="image"),
+            EnsureTyped(keys=["image", "label"]),
+            ConvertToMultiChannelBasedOnBratsClassesd(keys="label"),
+            Orientationd(keys=["image", "label"], axcodes="RAS"),
+            Spacingd(
+                keys=["image", "label"],
+                pixdim=(1.0, 1.0, 1.0),
+                mode=("bilinear", "nearest"),
+            ),
+            RandSpatialCropd(keys=["image", "label"], roi_size=[240, 240, 160], random_size=False),
+            ResizeWithPadOrCropd(keys=["image", "label"], spatial_size=spatial_size),
+            RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
+            RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
+            RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
+            NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
+            RandScaleIntensityd(keys="image", factors=0.1, prob=1.0),
+            RandShiftIntensityd(keys="image", offsets=0.1, prob=1.0),
+            ]
+        )
+    def val():
+        return Compose(
+            [
+            LoadImaged(keys=["image", "label"], reader="NibabelReader"),
+            EnsureChannelFirstd(keys="image"),
+            EnsureTyped(keys=["image", "label"]),
+            ConvertToMultiChannelBasedOnBratsClassesd(keys="label"),
+            Orientationd(keys=["image", "label"], axcodes="RAS"),
+            Spacingd(
+                keys=["image", "label"],
+                pixdim=(1.0, 1.0, 1.0),
+                mode=("bilinear", "nearest"),
+            ),
+            NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
+            ]
+        )
