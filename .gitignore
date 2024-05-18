@@ -5,5 +5,5 @@ data/raw
 # Utils Imports
 __pycache__
 
-# Model outputs
-outputs
+# Trained Models
+*.pth
