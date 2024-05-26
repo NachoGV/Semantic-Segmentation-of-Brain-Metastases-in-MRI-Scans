@@ -7,3 +7,6 @@ __pycache__
 
 # Trained Models
 *.pth
+
+# ONNX Model Files
+*.onnx
