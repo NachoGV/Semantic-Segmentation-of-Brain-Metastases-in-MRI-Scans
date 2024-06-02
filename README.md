@@ -11,4 +11,5 @@ Executed on Local:
 - data_analysis/data_exploration.ipynb
 - data_analysis/data_processing.ipynb
 - data_analysis/data_visualization.ipynb
-- results.ipynb
+- utils/results_generetor.ipynb
+- results_analysis.ipynbb
