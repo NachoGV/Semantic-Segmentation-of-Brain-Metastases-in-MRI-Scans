@@ -5,8 +5,7 @@ data/raw
 # Utils Imports
 __pycache__
 
-# Trained Models
-*.pth
-
-# ONNX Model Files
+# Outputs - Predictions, model architecture files & model checkpoints and best
+images/
 *.onnx
+*.pth
