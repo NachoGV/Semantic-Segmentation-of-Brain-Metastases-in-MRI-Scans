@@ -1,8 +1,10 @@
 import torch
+import nibabel as nib
+from scipy.ndimage import zoom
 from monai.utils import set_determinism
 from monai.transforms import MapTransform
+from nilearn.datasets import load_mni152_template
 from monai.transforms import (
-    Invertd,
     Compose,
     Spacingd,
     RandFlipd,
@@ -10,8 +12,6 @@ from monai.transforms import (
     AsDiscrete,
     EnsureTyped,
     Activations,
-    AsDiscreted,
-    Activationsd,
     Orientationd,
     RandSpatialCropd,
     NormalizeIntensityd,
@@ -107,3 +107,16 @@ class Transforms():
             AsDiscrete(threshold=0.5),
             ]
         )
+
+# To MNI Space 
+def mni_transform(img):
+          
+        # Template to match
+        mni_template = load_mni152_template()
+
+        # Resize
+        zoom_factors = [t_dim / s_dim for t_dim, s_dim in zip(mni_template.shape, img.shape)]
+        img_resized = zoom(img.get_fdata(), zoom_factors)
+        img_resized = nib.Nifti1Image(img_resized, mni_template.affine)
+
+        return img_resized
