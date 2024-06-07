@@ -35,6 +35,7 @@ defusedxml==0.7.1
 Deprecated==1.2.14
 docrep==0.3.2
 edt==2.4.0
+einops==0.8.0
 envisage==7.0.3
 et-xmlfile==1.1.0
 exceptiongroup==1.2.0
