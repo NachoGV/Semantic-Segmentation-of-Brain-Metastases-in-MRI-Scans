@@ -16,6 +16,7 @@ from skimage.measure import regionprops, label
 seed = 33
 VAL_AMP = True
 transforms = Transforms(seed)
+channels = ['TC', 'WT', 'ET']  
 
 # Metrics
 dice_metric = DiceMetric(include_background=True, reduction="mean")
@@ -59,7 +60,53 @@ def inference(input, spatial_size, model):
             return _compute(input)
     else:
         return _compute(input)
+    
+# Generate and Save Predictions
+def gen_predictions(model, model_name, dataloader, dataframe, spatial_size, mode):
+    
+        # Params
+        subject_cont = 0
+        device = config()
+        folder = None
+        if mode == 'train':
+            folder = 'train'
+        elif mode == 'val':
+            folder = 'val'
+        else:
+            print('Invalid Mode')
+            return
 
+        # Model
+        model.eval()
+
+        # Infer
+        with torch.no_grad():
+            for data in tqdm(dataloader):
+
+                # Load Data
+                inputs, labels = (
+                    data["image"].to(device),
+                    data["label"].to(device),
+                )
+
+                # Infer Data
+                outputs = inference(inputs, spatial_size, model)
+                outputs = [transforms.post()(x) for x in outputs]
+
+                # Save Ground Truth
+                for i, channel in enumerate(channels):
+                    nifti_image = nib.Nifti1Image(labels[0][i].cpu().numpy(), np.eye(4))
+                    path_to_gt = f'outputs/gt_segs/{folder}_gt_segs/gt_{dataframe["SubjectID"][subject_cont]}_{channel}.nii.gz'
+                    nib.save(nifti_image, f'../{path_to_gt}')
+
+                # Save Predictions
+                for i, channel in enumerate(channels):
+                    nifti_image = nib.Nifti1Image(outputs[0][i].cpu().numpy(), np.eye(4))
+                    path_to_pred = f'outputs/{model_name}/pred_segs/{folder}_pred_segs/pred_{dataframe["SubjectID"][subject_cont]}_{channel}.nii.gz'
+                    nib.save(nifti_image, f'../{path_to_pred}')
+
+                # Update Counter
+                subject_cont += 1
    
 # Individual model test set inferer
 def test_model(model, model_name, test_loader, test_df, spatial_size):
@@ -74,8 +121,7 @@ def test_model(model, model_name, test_loader, test_df, spatial_size):
     pred_v ={'TC': [], 'WT': [], 'ET': []}
     gt_v = {'TC': [], 'WT': [], 'ET': []}
     gt_paths = {'TC': [], 'WT': [], 'ET': []}
-    pred_paths = {'TC': [], 'WT': [], 'ET': []}
-    channels = ['TC', 'WT', 'ET']    
+    pred_paths = {'TC': [], 'WT': [], 'ET': []}  
     device = config()
 
 	# Model
@@ -119,15 +165,15 @@ def test_model(model, model_name, test_loader, test_df, spatial_size):
             
 			# Ground Truth Number of Metastases and Total Volume
             for i, channel in enumerate(channels):
-                 gt_image = nib.Nifti1Image(test_labels[0][i].cpu().numpy(), np.eye(4))
-                 voxel_volume = np.prod(gt_image.header.get_zooms())
-                 props = regionprops(label(gt_image.get_fdata()))
-                 volumes = [prop.area * voxel_volume for prop in props]
-                 gt_nm[channel].append(int(len(volumes)))
-                 gt_v[channel].append(int(np.sum(volumes)))
-                 path_to_gt = f'outputs/gt_segmentations/gt_{test_df["SubjectID"][len(metric_values)-1]}_{channel}.nii.gz'
-                 nib.save(gt_image, f'../{path_to_gt}')
-                 gt_paths[channel].append(path_to_gt)
+                gt_image = nib.Nifti1Image(test_labels[0][i].cpu().numpy(), np.eye(4))
+                voxel_volume = np.prod(gt_image.header.get_zooms())
+                props = regionprops(label(gt_image.get_fdata()))
+                volumes = [prop.area * voxel_volume for prop in props]
+                gt_nm[channel].append(int(len(volumes)))
+                gt_v[channel].append(int(np.sum(volumes)))
+                path_to_gt = f'outputs/gt_segs/test_gt_segs/gt_{test_df["SubjectID"][len(metric_values)-1]}_{channel}.nii.gz'
+                nib.save(gt_image, f'../{path_to_gt}')
+                gt_paths[channel].append(path_to_gt)
 
 			# Predicted Number of Metastases and Total Volume
             for i, channel in enumerate(channels):
@@ -137,7 +183,7 @@ def test_model(model, model_name, test_loader, test_df, spatial_size):
                  volumes = [prop.area * voxel_volume for prop in props]
                  pred_nm[channel].append(int(len(volumes)))
                  pred_v[channel].append(int(np.sum(volumes)))
-                 path_to_pred = f'outputs/{model_name}/pred_segmentations/pred_{test_df["SubjectID"][len(metric_values)-1]}_{channel}.nii.gz'
+                 path_to_pred = f'outputs/{model_name}/pred_segs/test_pred_segs/pred_{test_df["SubjectID"][len(metric_values)-1]}_{channel}.nii.gz'
                  nib.save(nifti_image, f'../{path_to_pred}')      
                  pred_paths[channel].append(path_to_pred)
                 

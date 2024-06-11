@@ -6,9 +6,7 @@ data/raw
 __pycache__
 
 # Outputs - Predictions, model architecture files & model checkpoints and best
-val_gt_segs/
-test_gt_segs/
-val_pred_segs/
-test_pred_segs/
+gt_segs/
+pred_segs/
 *.onnx
 *.pth
