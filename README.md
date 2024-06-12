@@ -12,4 +12,6 @@ Executed on Local:
 - data_analysis/data_processing.ipynb
 - data_analysis/data_visualization.ipynb
 - utils/results_generetor.ipynb
+- utils/segmentations_generator.ipynb
+- ensemble.ipynb
 - results_analysis.ipynbb
