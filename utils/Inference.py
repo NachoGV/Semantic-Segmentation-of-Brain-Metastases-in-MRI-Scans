@@ -2,14 +2,14 @@
 import os
 import torch
 import random
+import numpy as np
 import pandas as pd
-from Transforms import Transforms
+import nibabel as nib
 from tqdm import tqdm
+from Transforms import Transforms
 from monai.metrics import DiceMetric
 from monai.utils import set_determinism
 from monai.inferers import sliding_window_inference
-import numpy as np
-import nibabel as nib
 from skimage.measure import regionprops, label
 
 # Parameters
@@ -17,10 +17,6 @@ seed = 33
 VAL_AMP = True
 transforms = Transforms(seed)
 channels = ['TC', 'WT', 'ET']  
-
-# Metrics
-dice_metric = DiceMetric(include_background=True, reduction="mean")
-dice_metric_batch = DiceMetric(include_background=True, reduction="mean_batch")
 
 # Configurations
 def config():
@@ -72,6 +68,8 @@ def gen_predictions(model, model_name, dataloader, dataframe, spatial_size, mode
             folder = 'train'
         elif mode == 'val':
             folder = 'val'
+        elif mode == 'test':
+            folder = 'test'
         else:
             print('Invalid Mode')
             return
@@ -108,92 +106,93 @@ def gen_predictions(model, model_name, dataloader, dataframe, spatial_size, mode
                 # Update Counter
                 subject_cont += 1
    
-# Individual model test set inferer
-def test_model(model, model_name, test_loader, test_df, spatial_size):
-    
-	# Params
-    metric_values = []
-    metric_values_tc = []
-    metric_values_wt = []
-    metric_values_et = []
-    pred_nm ={'TC': [], 'WT': [], 'ET': []}
-    gt_nm ={'TC': [], 'WT': [], 'ET': []}
-    pred_v ={'TC': [], 'WT': [], 'ET': []}
-    gt_v = {'TC': [], 'WT': [], 'ET': []}
-    gt_paths = {'TC': [], 'WT': [], 'ET': []}
-    pred_paths = {'TC': [], 'WT': [], 'ET': []}  
-    device = config()
+# Ensemble Inference
+def ensemble_inference(dataframe, ensemble_function):
 
-	# Model
-    model.eval()
-    
-	# Infer
-    with torch.no_grad():
-        for test_data in tqdm(test_loader):
-            
-            # Load Data
-            test_inputs, test_labels = (
-				test_data["image"].to(device),
-				test_data["label"].to(device),
-			)
-            
-			# Infer Data
-            test_outputs = inference(test_inputs, spatial_size, model)
-            test_outputs = [transforms.post()(x) for x in test_outputs]
-            
-			# Mean Dice
-            dice_metric(y_pred=test_outputs, y=test_labels)
-            metric = dice_metric.aggregate().item()
-            metric_values.append(metric)
-            
-			# Batch Dice
-            dice_metric_batch(y_pred=test_outputs, y=test_labels)
-            metric_batch = dice_metric_batch.aggregate()
-            # TC
-            metric_tc = metric_batch[0].item()
-            metric_values_tc.append(metric_tc)
-            # WT
-            metric_wt = metric_batch[1].item()
-            metric_values_wt.append(metric_wt)
-            # ET
-            metric_et = metric_batch[2].item()
-            metric_values_et.append(metric_et)
-            # Reset
-            dice_metric.reset()
-            dice_metric_batch.reset()
-            #print(f'Dice: {metric:.4f} | Dice TC: {metric_tc:.4f} | Dice WT: {metric_wt:.4f} | Dice ET: {metric_et:.4f}')
-            
-			# Ground Truth Number of Metastases and Total Volume
-            for i, channel in enumerate(channels):
-                gt_image = nib.Nifti1Image(test_labels[0][i].cpu().numpy(), np.eye(4))
-                voxel_volume = np.prod(gt_image.header.get_zooms())
-                props = regionprops(label(gt_image.get_fdata()))
-                volumes = [prop.area * voxel_volume for prop in props]
-                gt_nm[channel].append(int(len(volumes)))
-                gt_v[channel].append(int(np.sum(volumes)))
-                path_to_gt = f'outputs/gt_segs/test_gt_segs/gt_{test_df["SubjectID"][len(metric_values)-1]}_{channel}.nii.gz'
-                nib.save(gt_image, f'../{path_to_gt}')
-                gt_paths[channel].append(path_to_gt)
+    # Dice Params
+    dice_values, dice_values_tc, dice_values_wt, dice_values_et = [], [], [], []
+    dice_metric = DiceMetric(include_background=True, reduction="mean")
+    dice_metric_batch = DiceMetric(include_background=True, reduction="mean_batch")
 
-			# Predicted Number of Metastases and Total Volume
-            for i, channel in enumerate(channels):
-                 nifti_image = nib.Nifti1Image(test_outputs[0][i].cpu().numpy(), np.eye(4))
-                 voxel_volume = np.prod(nifti_image.header.get_zooms())
-                 props = regionprops(label(nifti_image.get_fdata()))
-                 volumes = [prop.area * voxel_volume for prop in props]
-                 pred_nm[channel].append(int(len(volumes)))
-                 pred_v[channel].append(int(np.sum(volumes)))
-                 path_to_pred = f'outputs/{model_name}/pred_segs/test_pred_segs/pred_{test_df["SubjectID"][len(metric_values)-1]}_{channel}.nii.gz'
-                 nib.save(nifti_image, f'../{path_to_pred}')      
-                 pred_paths[channel].append(path_to_pred)
+    # Biometrics Params
+    ids = []
+    gt_nm, pred_nm = {'TC': [], 'WT': [], 'ET': []}, {'TC': [], 'WT': [], 'ET': []}
+    gt_v, pred_v = {'TC': [], 'WT': [], 'ET': []}, {'TC': [], 'WT': [], 'ET': []}
+
+    # Iterate over the dataframe
+    for i in range(len(dataframe)):
+
+        # Subject & Label
+        subject_id = dataframe['SubjectID'][i]
+        load_label = dataframe['GT'][i]
+        
+        # Images
+        load_ahnet = dataframe['AHNet'][i]
+        load_segresnet = dataframe['SegResNet'][i]
+        load_unet = dataframe['UNet'][i]
+        load_unetr = dataframe['UNETR'][i]
+        
+        # Params 
+        ahnet_image, segresnet_image, unet_image, unetr_image, img_label = [], [], [], [], []
+        image_voxel_volume = np.prod(nib.load(load_ahnet[0]).header.get_zooms()) # (Should be the same for all models)
+        label_voxel_volume = np.prod(nib.load(load_ahnet[0]).header.get_zooms())
+
+        # Load Images and Label
+        for j in range(len(load_ahnet)): # (Should be the same for all models)
+            ahnet_image.append(torch.tensor(nib.load(load_ahnet[j]).get_fdata()).unsqueeze(0))
+            segresnet_image.append(torch.tensor(nib.load(load_segresnet[j]).get_fdata()).unsqueeze(0))
+            unet_image.append(torch.tensor(nib.load(load_unet[j]).get_fdata()).unsqueeze(0))
+            unetr_image.append(torch.tensor(nib.load(load_unetr[j]).get_fdata()).unsqueeze(0))
+            img_label.append(torch.tensor(nib.load(load_label[j]).get_fdata()).unsqueeze(0))
+            
+        # Stack Images and Label
+        ahnet_image = torch.stack(ahnet_image, dim = 1)
+        segresnet_image = torch.stack(segresnet_image, dim = 1)
+        unet_image = torch.stack(unet_image, dim = 1)
+        unetr_image = torch.stack(unetr_image, dim = 1)
+        img_label = torch.stack(img_label, dim = 1)
+
+        # Ensemble Function
+        img = ensemble_function([ahnet_image, segresnet_image, unet_image, unetr_image], img_label)
+
+        # Dice Metric
+        dice_metric(y_pred=img, y=img_label)
+        dice_score = dice_metric.aggregate()
+        dice_values.append(dice_score.item())
+
+        dice_metric.reset()
+            
+		# Batch Dice
+        dice_metric_batch(y_pred=img, y=img_label)
+        dice_batch = dice_metric_batch.aggregate()
+        dice_values_tc.append(dice_batch[0].item())
+        dice_values_wt.append(dice_batch[1].item())
+        dice_values_et.append(dice_batch[2].item())
+        dice_metric_batch.reset()     
+
+        # Biometrics
+        for j, channel in enumerate(channels):
+            # Image
+            props = regionprops(label(nib.Nifti1Image(img[0][j].cpu().numpy(), np.eye(4)).get_fdata()))
+            volumes = [prop.area * image_voxel_volume for prop in props]
+            pred_nm[channel].append(int(len(volumes)))
+            pred_v[channel].append(int(np.sum(volumes)))
+            # Label
+            props = regionprops(label(nib.Nifti1Image(img_label[0][j].cpu().numpy(), np.eye(4)).get_fdata()))
+            volumes = [prop.area * label_voxel_volume for prop in props]
+            gt_nm[channel].append(int(len(volumes)))
+            gt_v[channel].append(int(np.sum(volumes)))
+
+        # Subject ID
+        ids.append(subject_id)
                 
     # Excel
     df = pd.DataFrame({
-        'SubjectID': test_df['SubjectID'],
-		'Dice': metric_values,
-		'Dice TC': metric_values_tc,
-		'Dice WT': metric_values_wt,
-		'Dice ET': metric_values_et,
+        'SubjectID': ids,
+		'Dice': dice_values,
+		'Dice TC': dice_values_tc,
+		'Dice WT': dice_values_wt,
+		'Dice ET': dice_values_et,
 		'Pred NM TC': pred_nm['TC'],
 		'Pred NM WT': pred_nm['WT'],
 		'Pred NM ET': pred_nm['ET'],
@@ -206,13 +205,101 @@ def test_model(model, model_name, test_loader, test_df, spatial_size):
 		'GT V TC': gt_v['TC'],
 		'GT V WT': gt_v['WT'],
 		'GT V ET': gt_v['ET'],
-        'Pred TC': pred_paths['TC'],
-        'Pred WT': pred_paths['WT'],
-        'Pred ET': pred_paths['ET'],
-        'GT TC': gt_paths['TC'],
-        'GT WT': gt_paths['WT'],
-        'GT ET': gt_paths['ET'],
 	})
-    df.set_index('SubjectID', inplace=True)
+    
+    return df
+
+# Individual model test set inferer
+def calculate_metrics(model_name, dataframe):
+
+    # Dice Params
+    dice_values, dice_values_tc, dice_values_wt, dice_values_et = [], [], [], []
+    dice_metric = DiceMetric(include_background=True, reduction="mean")
+    dice_metric_batch = DiceMetric(include_background=True, reduction="mean_batch")
+
+    # Biometrics Params
+    ids = []
+    gt_nm, pred_nm = {'TC': [], 'WT': [], 'ET': []}, {'TC': [], 'WT': [], 'ET': []}
+    gt_v, pred_v = {'TC': [], 'WT': [], 'ET': []}, {'TC': [], 'WT': [], 'ET': []}
+    gt_paths, pred_paths = [], []
+
+    # Iterate over the dataframe
+    for i in range(len(dataframe)):
+        
+        # Load Data
+        img = []
+        img_label = []
+        subject_id = dataframe['SubjectID'][i]
+        load_image = dataframe[model_name][i]
+        load_label = dataframe['GT'][i]
+        image_voxel_volume = np.prod(nib.load(load_image[0]).header.get_zooms())
+        label_voxel_volume = np.prod(nib.load(load_label[0]).header.get_zooms())
+
+        # Load Images and Labels
+        for j in range(len(load_image)):
+            img.append(torch.tensor(nib.load(load_image[j]).get_fdata()).unsqueeze(0))
+            img_label.append(torch.tensor(nib.load(load_label[j]).get_fdata()).unsqueeze(0))
+        img = torch.stack(img, dim = 1)
+        img_label = torch.stack(img_label, dim = 1)
+
+        # Dice Metric
+        dice_metric(y_pred=img, y=img_label)
+        dice_score = dice_metric.aggregate()
+        dice_values.append(dice_score.item())
+        dice_metric.reset()
+            
+		# Batch Dice
+        dice_metric_batch(y_pred=img, y=img_label)
+        dice_batch = dice_metric_batch.aggregate()
+        dice_values_tc.append(dice_batch[0].item())
+        dice_values_wt.append(dice_batch[1].item())
+        dice_values_et.append(dice_batch[2].item())
+        dice_metric_batch.reset()     
+
+        # Biometrics
+        for j, channel in enumerate(channels):
+            # Image
+            props = regionprops(label(nib.Nifti1Image(img[0][j].cpu().numpy(), np.eye(4)).get_fdata()))
+            volumes = [prop.area * image_voxel_volume for prop in props]
+            pred_nm[channel].append(int(len(volumes)))
+            pred_v[channel].append(int(np.sum(volumes)))
+            # Label
+            props = regionprops(label(nib.Nifti1Image(img_label[0][j].cpu().numpy(), np.eye(4)).get_fdata()))
+            volumes = [prop.area * label_voxel_volume for prop in props]
+            gt_nm[channel].append(int(len(volumes)))
+            gt_v[channel].append(int(np.sum(volumes)))
+
+        # Paths
+        # Remove the '../' from the path
+        load_image = [x[3:] for x in load_image]
+        load_label = [x[3:] for x in load_label]
+        gt_paths.append(load_label)
+        pred_paths.append(load_image)
+
+        # Subject ID
+        ids.append(subject_id)
+                
+    # Excel
+    df = pd.DataFrame({
+        'SubjectID': ids,
+		'Dice': dice_values,
+		'Dice TC': dice_values_tc,
+		'Dice WT': dice_values_wt,
+		'Dice ET': dice_values_et,
+		'Pred NM TC': pred_nm['TC'],
+		'Pred NM WT': pred_nm['WT'],
+		'Pred NM ET': pred_nm['ET'],
+		'GT NM TC': gt_nm['TC'],
+		'GT NM WT': gt_nm['WT'],
+		'GT NM ET': gt_nm['ET'],
+		'Pred V TC': pred_v['TC'],
+		'Pred V WT': pred_v['WT'],
+		'Pred V ET': pred_v['ET'],
+		'GT V TC': gt_v['TC'],
+		'GT V WT': gt_v['WT'],
+		'GT V ET': gt_v['ET'],
+        'Pred Paths': pred_paths,
+        'GT Paths': gt_paths
+	})
     
     return df
