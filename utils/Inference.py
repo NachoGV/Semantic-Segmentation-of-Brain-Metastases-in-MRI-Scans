@@ -11,6 +11,7 @@ from monai.metrics import DiceMetric
 from monai.utils import set_determinism
 from monai.inferers import sliding_window_inference
 from skimage.measure import regionprops, label
+from monai.transforms import Activations, AsDiscrete
 
 # Parameters
 seed = 33
@@ -89,7 +90,8 @@ def gen_predictions(model, model_name, dataloader, dataframe, spatial_size, mode
 
                 # Infer Data
                 outputs = inference(inputs, spatial_size, model)
-                outputs = [transforms.post()(x) for x in outputs]
+                trans = Activations(sigmoid=True)
+                outputs = trans(outputs)
 
                 # Save Ground Truth
                 for i, channel in enumerate(channels):
@@ -108,6 +110,9 @@ def gen_predictions(model, model_name, dataloader, dataframe, spatial_size, mode
    
 # Ensemble Inference
 def ensemble_inference(dataframe, ensemble_function):
+
+    # Transforms
+    trans = AsDiscrete(threshold=0.5)
 
     # Dice Params
     dice_values, dice_values_tc, dice_values_wt, dice_values_et = [], [], [], []
@@ -153,7 +158,11 @@ def ensemble_inference(dataframe, ensemble_function):
         img_label = torch.stack(img_label, dim = 1)
 
         # Ensemble Function
-        img = ensemble_function([ahnet_image, segresnet_image, unet_image, unetr_image], img_label)
+        img = ensemble_function([ahnet_image, segresnet_image, unet_image, unetr_image])
+
+        # Discretizise
+        img = trans(img)
+        img_label = trans(img_label)
 
         # Dice Metric
         dice_metric(y_pred=img, y=img_label)
@@ -212,6 +221,8 @@ def ensemble_inference(dataframe, ensemble_function):
 # Individual model test set inferer
 def calculate_metrics(model_name, dataframe):
 
+    trans = AsDiscrete(threshold=0.5)
+
     # Dice Params
     dice_values, dice_values_tc, dice_values_wt, dice_values_et = [], [], [], []
     dice_metric = DiceMetric(include_background=True, reduction="mean")
@@ -232,13 +243,13 @@ def calculate_metrics(model_name, dataframe):
         subject_id = dataframe['SubjectID'][i]
         load_image = dataframe[model_name][i]
         load_label = dataframe['GT'][i]
-        image_voxel_volume = np.prod(nib.load(load_image[0]).header.get_zooms())
-        label_voxel_volume = np.prod(nib.load(load_label[0]).header.get_zooms())
 
         # Load Images and Labels
         for j in range(len(load_image)):
-            img.append(torch.tensor(nib.load(load_image[j]).get_fdata()).unsqueeze(0))
-            img_label.append(torch.tensor(nib.load(load_label[j]).get_fdata()).unsqueeze(0))
+            nifti_image = torch.tensor(nib.load(load_image[j]).get_fdata()).unsqueeze(0)
+            img.append(trans(nifti_image))
+            nifti_label = torch.tensor(nib.load(load_label[j]).get_fdata()).unsqueeze(0)
+            img_label.append(trans(nifti_label))
         img = torch.stack(img, dim = 1)
         img_label = torch.stack(img_label, dim = 1)
 
@@ -257,6 +268,8 @@ def calculate_metrics(model_name, dataframe):
         dice_metric_batch.reset()     
 
         # Biometrics
+        image_voxel_volume = np.prod(nib.load(load_image[0]).header.get_zooms())
+        label_voxel_volume = np.prod(nib.load(load_label[0]).header.get_zooms())
         for j, channel in enumerate(channels):
             # Image
             props = regionprops(label(nib.Nifti1Image(img[0][j].cpu().numpy(), np.eye(4)).get_fdata()))
