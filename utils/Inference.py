@@ -1,5 +1,4 @@
 # Imports
-import os
 import torch
 import random
 import numpy as np
@@ -93,26 +92,19 @@ def gen_predictions(model, model_name, dataloader, dataframe, spatial_size, mode
                 trans = Activations(sigmoid=True)
                 outputs = trans(outputs)
 
-                # Save Ground Truth
+                # Save
                 for i, channel in enumerate(channels):
-                    nifti_image = nib.Nifti1Image(labels[0][i].cpu().numpy(), np.eye(4))
-                    path_to_gt = f'outputs/gt_segs/{folder}_gt_segs/gt_{dataframe["SubjectID"][subject_cont]}_{channel}.nii.gz'
-                    nib.save(nifti_image, f'../{path_to_gt}')
-
-                # Save Predictions
-                for i, channel in enumerate(channels):
-                    nifti_image = nib.Nifti1Image(outputs[0][i].cpu().numpy(), np.eye(4))
-                    path_to_pred = f'outputs/{model_name}/pred_segs/{folder}_pred_segs/pred_{dataframe["SubjectID"][subject_cont]}_{channel}.nii.gz'
-                    nib.save(nifti_image, f'../{path_to_pred}')
+                    torch.save(labels[0][i], f'../outputs/gt_segs/{folder}_gt_segs/gt_{dataframe["SubjectID"][subject_cont]}_{channel}.pt')
+                    torch.save(outputs[0][i], f'../outputs/{model_name}/pred_segs/{folder}_pred_segs/pred_{dataframe["SubjectID"][subject_cont]}_{channel}.pt')                    
 
                 # Update Counter
                 subject_cont += 1
    
 # Ensemble Inference
-def ensemble_inference(dataframe, ensemble_function):
+def ensemble_inference(dataframe, ensemble_function, threshold = 0.5, apply_crf = False):
 
     # Transforms
-    trans = AsDiscrete(threshold=0.5)
+    trans = AsDiscrete(threshold=threshold)
 
     # Dice Params
     dice_values, dice_values_tc, dice_values_wt, dice_values_et = [], [], [], []
@@ -138,27 +130,29 @@ def ensemble_inference(dataframe, ensemble_function):
         load_unetr = dataframe['UNETR'][i]
         
         # Params 
-        ahnet_image, segresnet_image, unet_image, unetr_image, img_label = [], [], [], [], []
-        image_voxel_volume = np.prod(nib.load(load_ahnet[0]).header.get_zooms()) # (Should be the same for all models)
-        label_voxel_volume = np.prod(nib.load(load_ahnet[0]).header.get_zooms())
+        image_voxel_volume = np.prod((1,1,1))
+        label_voxel_volume = np.prod((1,1,1))
 
-        # Load Images and Label
-        for j in range(len(load_ahnet)): # (Should be the same for all models)
-            ahnet_image.append(torch.tensor(nib.load(load_ahnet[j]).get_fdata()).unsqueeze(0))
-            segresnet_image.append(torch.tensor(nib.load(load_segresnet[j]).get_fdata()).unsqueeze(0))
-            unet_image.append(torch.tensor(nib.load(load_unet[j]).get_fdata()).unsqueeze(0))
-            unetr_image.append(torch.tensor(nib.load(load_unetr[j]).get_fdata()).unsqueeze(0))
-            img_label.append(torch.tensor(nib.load(load_label[j]).get_fdata()).unsqueeze(0))
+        # Load Images and Labels
+        ahnet_image = [torch.load(x) for x in load_ahnet]
+        segresnet_image = [torch.load(x) for x in load_segresnet]
+        unet_image = [torch.load(x) for x in load_unet]
+        unetr_image = [torch.load(x) for x in load_unetr]
+        img_label = [torch.load(x) for x in load_label] 
             
         # Stack Images and Label
-        ahnet_image = torch.stack(ahnet_image, dim = 1)
-        segresnet_image = torch.stack(segresnet_image, dim = 1)
-        unet_image = torch.stack(unet_image, dim = 1)
-        unetr_image = torch.stack(unetr_image, dim = 1)
-        img_label = torch.stack(img_label, dim = 1)
+        ahnet_image = torch.stack(ahnet_image, dim = 0).unsqueeze(0)
+        segresnet_image = torch.stack(segresnet_image, dim = 0).unsqueeze(0)
+        unet_image = torch.stack(unet_image, dim = 0).unsqueeze(0)
+        unetr_image = torch.stack(unetr_image, dim = 0).unsqueeze(0)
+        img_label = torch.stack(img_label, dim = 0).unsqueeze(0)
 
         # Ensemble Function
-        img = ensemble_function([ahnet_image, segresnet_image, unet_image, unetr_image])
+        img = None
+        if apply_crf:
+            img = ensemble_function(img_label, [ahnet_image, segresnet_image, unet_image, unetr_image])
+        else:
+            img = ensemble_function([ahnet_image, segresnet_image, unet_image, unetr_image])
 
         # Discretizise
         img = trans(img)
@@ -219,9 +213,9 @@ def ensemble_inference(dataframe, ensemble_function):
     return df
 
 # Individual model test set inferer
-def calculate_metrics(model_name, dataframe):
+def calculate_metrics(model_name, dataframe, threshold = 0.5):
 
-    trans = AsDiscrete(threshold=0.5)
+    trans = AsDiscrete(threshold=threshold)
 
     # Dice Params
     dice_values, dice_values_tc, dice_values_wt, dice_values_et = [], [], [], []
@@ -238,20 +232,17 @@ def calculate_metrics(model_name, dataframe):
     for i in range(len(dataframe)):
         
         # Load Data
-        img = []
-        img_label = []
         subject_id = dataframe['SubjectID'][i]
         load_image = dataframe[model_name][i]
         load_label = dataframe['GT'][i]
+        img = [torch.load(x) for x in load_image]
+        img_label = [torch.load(x) for x in load_label]
+        img = torch.stack(img, dim = 0).unsqueeze(0)
+        img_label = torch.stack(img_label, dim = 0).unsqueeze(0)
 
-        # Load Images and Labels
-        for j in range(len(load_image)):
-            nifti_image = torch.tensor(nib.load(load_image[j]).get_fdata()).unsqueeze(0)
-            img.append(trans(nifti_image))
-            nifti_label = torch.tensor(nib.load(load_label[j]).get_fdata()).unsqueeze(0)
-            img_label.append(trans(nifti_label))
-        img = torch.stack(img, dim = 1)
-        img_label = torch.stack(img_label, dim = 1)
+        # Discretizise
+        img = trans(img)
+        img_label = trans(img_label)
 
         # Dice Metric
         dice_metric(y_pred=img, y=img_label)
@@ -268,8 +259,8 @@ def calculate_metrics(model_name, dataframe):
         dice_metric_batch.reset()     
 
         # Biometrics
-        image_voxel_volume = np.prod(nib.load(load_image[0]).header.get_zooms())
-        label_voxel_volume = np.prod(nib.load(load_label[0]).header.get_zooms())
+        image_voxel_volume = np.prod((1,1,1))
+        label_voxel_volume = np.prod((1,1,1))
         for j, channel in enumerate(channels):
             # Image
             props = regionprops(label(nib.Nifti1Image(img[0][j].cpu().numpy(), np.eye(4)).get_fdata()))
@@ -283,7 +274,6 @@ def calculate_metrics(model_name, dataframe):
             gt_v[channel].append(int(np.sum(volumes)))
 
         # Paths
-        # Remove the '../' from the path
         load_image = [x[3:] for x in load_image]
         load_label = [x[3:] for x in load_label]
         gt_paths.append(load_label)

@@ -119,13 +119,12 @@ class Transforms():
 
 # To MNI Space 
 def mni_transform(img):
-          
-        # Template to match
-        mni_template = load_mni152_template()
+    # Template to match
+    mni_template = load_mni152_template()
 
-        # Resize
-        zoom_factors = [t_dim / s_dim for t_dim, s_dim in zip(mni_template.shape, img.shape)]
-        img_resized = zoom(img.get_fdata(), zoom_factors)
-        img_resized = nib.Nifti1Image(img_resized, mni_template.affine)
+    # Resize
+    zoom_factors = [t_dim / s_dim for t_dim, s_dim in zip(mni_template.shape, img.shape)]
+    img_resized = zoom(img.get_fdata(), zoom_factors, order=0)
+    img_resized = nib.Nifti1Image(img_resized, mni_template.affine)
 
-        return img_resized
+    return img_resized

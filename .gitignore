@@ -8,5 +8,6 @@ __pycache__
 # Outputs - Predictions, model architecture files & model checkpoints and best
 gt_segs/
 pred_segs/
+figures/
 *.onnx
 *.pth
