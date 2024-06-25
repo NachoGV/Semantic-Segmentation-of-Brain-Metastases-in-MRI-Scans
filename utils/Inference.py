@@ -94,14 +94,16 @@ def gen_predictions(model, model_name, dataloader, dataframe, spatial_size, mode
 
                 # Save
                 for i, channel in enumerate(channels):
-                    torch.save(labels[0][i], f'../outputs/gt_segs/{folder}_gt_segs/gt_{dataframe["SubjectID"][subject_cont]}_{channel}.pt')
-                    torch.save(outputs[0][i], f'../outputs/{model_name}/pred_segs/{folder}_pred_segs/pred_{dataframe["SubjectID"][subject_cont]}_{channel}.pt')                    
+                    #torch.save(labels[0][i], f'../outputs/gt_segs/{folder}_gt_segs/gt_{dataframe["SubjectID"][subject_cont]}_{channel}.pt', _use_new_zipfile_serialization=True)
+                    #torch.save(outputs[0][i], f'../outputs/{model_name}/pred_segs/{folder}_pred_segs/pred_{dataframe["SubjectID"][subject_cont]}_{channel}.pt', _use_new_zipfile_serialization=True)              
+                    np.savez_compressed(f'../outputs/{model_name}/pred_segs/{folder}_pred_segs/pred_{dataframe["SubjectID"][subject_cont]}_{channel}.npz', outputs[0][i].cpu().numpy())
+                    np.savez_compressed(f'../outputs/gt_segs/{folder}_gt_segs/gt_{dataframe["SubjectID"][subject_cont]}_{channel}.npz', labels[0][i].cpu().numpy())
 
                 # Update Counter
                 subject_cont += 1
    
 # Ensemble Inference
-def ensemble_inference(dataframe, ensemble_function, threshold = 0.5, apply_crf = False):
+def ensemble_inference(dataframe, ensemble_function, threshold = 0.5, include_label = False, model = None):
 
     # Transforms
     trans = AsDiscrete(threshold=threshold)
@@ -134,11 +136,18 @@ def ensemble_inference(dataframe, ensemble_function, threshold = 0.5, apply_crf 
         label_voxel_volume = np.prod((1,1,1))
 
         # Load Images and Labels
-        ahnet_image = [torch.load(x) for x in load_ahnet]
-        segresnet_image = [torch.load(x) for x in load_segresnet]
-        unet_image = [torch.load(x) for x in load_unet]
-        unetr_image = [torch.load(x) for x in load_unetr]
-        img_label = [torch.load(x) for x in load_label] 
+        ahnet_image = [np.load(x)['arr_0'] for x in load_ahnet]
+        segresnet_image = [np.load(x)['arr_0'] for x in load_segresnet]
+        unet_image = [np.load(x)['arr_0'] for x in load_unet]
+        unetr_image = [np.load(x)['arr_0'] for x in load_unetr]
+        img_label = [np.load(x)['arr_0'] for x in load_label] 
+
+        # To Tensor
+        ahnet_image = [torch.from_numpy(x) for x in ahnet_image]
+        segresnet_image = [torch.from_numpy(x) for x in segresnet_image]
+        unet_image = [torch.from_numpy(x) for x in unet_image]
+        unetr_image = [torch.from_numpy(x) for x in unetr_image]
+        img_label = [torch.from_numpy(x) for x in img_label]
             
         # Stack Images and Label
         ahnet_image = torch.stack(ahnet_image, dim = 0).unsqueeze(0)
@@ -149,8 +158,10 @@ def ensemble_inference(dataframe, ensemble_function, threshold = 0.5, apply_crf 
 
         # Ensemble Function
         img = None
-        if apply_crf:
-            img = ensemble_function(img_label, [ahnet_image, segresnet_image, unet_image, unetr_image])
+        if include_label:
+            img = ensemble_function([ahnet_image, segresnet_image, unet_image, unetr_image], img_label)
+        elif model is not None:
+            img = ensemble_function([ahnet_image, segresnet_image, unet_image, unetr_image], model)
         else:
             img = ensemble_function([ahnet_image, segresnet_image, unet_image, unetr_image])
 
@@ -162,7 +173,6 @@ def ensemble_inference(dataframe, ensemble_function, threshold = 0.5, apply_crf 
         dice_metric(y_pred=img, y=img_label)
         dice_score = dice_metric.aggregate()
         dice_values.append(dice_score.item())
-
         dice_metric.reset()
             
 		# Batch Dice
@@ -235,8 +245,10 @@ def calculate_metrics(model_name, dataframe, threshold = 0.5):
         subject_id = dataframe['SubjectID'][i]
         load_image = dataframe[model_name][i]
         load_label = dataframe['GT'][i]
-        img = [torch.load(x) for x in load_image]
-        img_label = [torch.load(x) for x in load_label]
+        img = [np.load(x)['arr_0'] for x in load_image]
+        img_label = [np.load(x)['arr_0'] for x in load_label]
+        img = [torch.from_numpy(x) for x in img]
+        img_label = [torch.from_numpy(x) for x in img_label]
         img = torch.stack(img, dim = 0).unsqueeze(0)
         img_label = torch.stack(img_label, dim = 0).unsqueeze(0)
 

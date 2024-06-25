@@ -5,7 +5,7 @@ data/raw
 # Utils Imports
 __pycache__
 
-# Outputs - Predictions, model architecture files & model checkpoints and best
+# Outputs - Predictions, model architecture files, model checkpoints, images, etc.
 gt_segs/
 pred_segs/
 figures/
