@@ -94,8 +94,6 @@ def gen_predictions(model, model_name, dataloader, dataframe, spatial_size, mode
 
                 # Save
                 for i, channel in enumerate(channels):
-                    #torch.save(labels[0][i], f'../outputs/gt_segs/{folder}_gt_segs/gt_{dataframe["SubjectID"][subject_cont]}_{channel}.pt', _use_new_zipfile_serialization=True)
-                    #torch.save(outputs[0][i], f'../outputs/{model_name}/pred_segs/{folder}_pred_segs/pred_{dataframe["SubjectID"][subject_cont]}_{channel}.pt', _use_new_zipfile_serialization=True)              
                     np.savez_compressed(f'../outputs/{model_name}/pred_segs/{folder}_pred_segs/pred_{dataframe["SubjectID"][subject_cont]}_{channel}.npz', outputs[0][i].cpu().numpy())
                     np.savez_compressed(f'../outputs/gt_segs/{folder}_gt_segs/gt_{dataframe["SubjectID"][subject_cont]}_{channel}.npz', labels[0][i].cpu().numpy())
 
@@ -103,7 +101,7 @@ def gen_predictions(model, model_name, dataloader, dataframe, spatial_size, mode
                 subject_cont += 1
    
 # Ensemble Inference
-def ensemble_inference(dataframe, ensemble_function, threshold = 0.5, include_label = False, model = None):
+def ensemble_inference(dataframe, ensemble_function, threshold = 0.5, include_label = False, model = None, store_npz = False, model_name = None):
 
     # Transforms
     trans = AsDiscrete(threshold=threshold)
@@ -115,6 +113,7 @@ def ensemble_inference(dataframe, ensemble_function, threshold = 0.5, include_la
 
     # Biometrics Params
     ids = []
+    pred_paths = []
     gt_nm, pred_nm = {'TC': [], 'WT': [], 'ET': []}, {'TC': [], 'WT': [], 'ET': []}
     gt_v, pred_v = {'TC': [], 'WT': [], 'ET': []}, {'TC': [], 'WT': [], 'ET': []}
 
@@ -164,6 +163,15 @@ def ensemble_inference(dataframe, ensemble_function, threshold = 0.5, include_la
             img = ensemble_function([ahnet_image, segresnet_image, unet_image, unetr_image], model)
         else:
             img = ensemble_function([ahnet_image, segresnet_image, unet_image, unetr_image])
+
+        # Save NPZ
+        if store_npz:
+            np.savez_compressed(f'./outputs/Ensemble/pred_{model_name}/pred_{subject_id}_TC.npz', img[0][0])
+            np.savez_compressed(f'./outputs/Ensemble/pred_{model_name}/pred_{subject_id}_WT.npz', img[0][1])
+            np.savez_compressed(f'./outputs/Ensemble/pred_{model_name}/pred_{subject_id}_ET.npz', img[0][2])
+            pred_paths.append([f'./outputs/Ensemble/pred_{model_name}/pred_{subject_id}_TC.npz', 
+                               f'./outputs/Ensemble/pred_{model_name}/pred_{subject_id}_WT.npz',
+                               f'./outputs/Ensemble/pred_{model_name}/pred_{subject_id}_ET.npz'])
 
         # Discretizise
         img = trans(img)
@@ -219,6 +227,9 @@ def ensemble_inference(dataframe, ensemble_function, threshold = 0.5, include_la
 		'GT V WT': gt_v['WT'],
 		'GT V ET': gt_v['ET'],
 	})
+    
+    if store_npz:
+        df['Pred Paths'] = pred_paths
     
     return df
 
