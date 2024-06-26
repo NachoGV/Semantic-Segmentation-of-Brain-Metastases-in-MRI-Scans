@@ -107,15 +107,6 @@ class Transforms():
             AsDiscrete(threshold=0.5),
             ]
         )
-        
-    def ensemble(self, spatial_size):
-        return Compose(
-            [
-            EnsureTyped(keys="image"),
-            RandSpatialCropd(keys="image", roi_size=[256, 256, 160], random_size=False),
-            ResizeWithPadOrCropd(keys="image", spatial_size=spatial_size),
-            ]
-        )
 
 # To MNI Space 
 def mni_transform(img):
