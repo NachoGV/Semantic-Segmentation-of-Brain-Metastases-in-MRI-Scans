@@ -7,9 +7,7 @@ __pycache__
 
 # Outputs - Predictions, model architecture files, model checkpoints, images, etc.
 gt_segs/
-pred_segs/
-pred_dim_logreg/
-pred_voxel_logreg/
+pred_*/
 figures/
 *.onnx
 *.pth
