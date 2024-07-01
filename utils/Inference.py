@@ -157,9 +157,11 @@ def ensemble_inference(dataframe, ensemble_function, threshold = 0.5, include_la
 
         # Ensemble Function
         img = None
-        if include_label:
+        if include_label and model is None:
             img = ensemble_function([ahnet_image, segresnet_image, unet_image, unetr_image], img_label)
-        elif model is not None:
+        elif model is not None and include_label:
+            img = ensemble_function([ahnet_image, segresnet_image, unet_image, unetr_image], img_label, model)
+        elif model is not None and not include_label:
             img = ensemble_function([ahnet_image, segresnet_image, unet_image, unetr_image], model)
         else:
             img = ensemble_function([ahnet_image, segresnet_image, unet_image, unetr_image])

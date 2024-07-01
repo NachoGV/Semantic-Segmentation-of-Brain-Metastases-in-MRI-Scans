@@ -1,0 +1,2 @@
+SubjectID,Dice,Dice TC,Dice WT,Dice ET,Pred NM TC,Pred NM WT,Pred NM ET,GT NM TC,GT NM WT,GT NM ET,Pred V TC,Pred V WT,Pred V ET,GT V TC,GT V WT,GT V ET,Pred Paths
+100214B,0.453292578458786,0.518792986869812,0.5202991366386414,0.32078561186790466,11,7,7,16,16,2,1167,1150,917,722,722,305,"['./outputs/Ensemble/pred_crf/pred_100214B_TC.npz', './outputs/Ensemble/pred_crf/pred_100214B_WT.npz', './outputs/Ensemble/pred_crf/pred_100214B_ET.npz']"
