@@ -17,6 +17,7 @@ seed = 33
 VAL_AMP = True
 transforms = Transforms(seed)
 channels = ['TC', 'WT', 'ET']  
+max_size = (315, 315, 308)
 
 # Configurations
 def config():
@@ -100,8 +101,8 @@ def gen_predictions(model, model_name, dataloader, dataframe, spatial_size, mode
                 # Update Counter
                 subject_cont += 1
    
-# Ensemble Inference
-def ensemble_inference(dataframe, ensemble_function, threshold = 0.5, include_label = False, model = None, store_npz = False, model_name = None):
+# Ensemble Inference With UNet
+def ensemble_inference(dataframe, ensemble_function, threshold = 0.5, model = None, store_npz = False, model_name = None):
 
     # Transforms
     trans = AsDiscrete(threshold=threshold)
@@ -141,6 +142,14 @@ def ensemble_inference(dataframe, ensemble_function, threshold = 0.5, include_la
         unetr_image = [np.load(x)['arr_0'] for x in load_unetr]
         img_label = [np.load(x)['arr_0'] for x in load_label] 
 
+        # Pad 
+        if model is not None:
+            ahnet_image = [np.pad(x, ((0, max_size[0] - x.shape[0]), (0, max_size[1] - x.shape[1]), (0, max_size[2] - x.shape[2])), 'constant', constant_values=0) for x in ahnet_image]
+            segresnet_image = [np.pad(x, ((0, max_size[0] - x.shape[0]), (0, max_size[1] - x.shape[1]), (0, max_size[2] - x.shape[2])), 'constant', constant_values=0) for x in segresnet_image]
+            unet_image = [np.pad(x, ((0, max_size[0] - x.shape[0]), (0, max_size[1] - x.shape[1]), (0, max_size[2] - x.shape[2])), 'constant', constant_values=0) for x in unet_image]
+            unetr_image = [np.pad(x, ((0, max_size[0] - x.shape[0]), (0, max_size[1] - x.shape[1]), (0, max_size[2] - x.shape[2])), 'constant', constant_values=0) for x in unetr_image]
+            img_label = [np.pad(x, ((0, max_size[0] - x.shape[0]), (0, max_size[1] - x.shape[1]), (0, max_size[2] - x.shape[2])), 'constant', constant_values=0) for x in img_label]
+
         # To Tensor
         ahnet_image = [torch.from_numpy(x) for x in ahnet_image]
         segresnet_image = [torch.from_numpy(x) for x in segresnet_image]
@@ -157,11 +166,7 @@ def ensemble_inference(dataframe, ensemble_function, threshold = 0.5, include_la
 
         # Ensemble Function
         img = None
-        if include_label and model is None:
-            img = ensemble_function([ahnet_image, segresnet_image, unet_image, unetr_image], img_label)
-        elif model is not None and include_label:
-            img = ensemble_function([ahnet_image, segresnet_image, unet_image, unetr_image], img_label, model)
-        elif model is not None and not include_label:
+        if model is not None:
             img = ensemble_function([ahnet_image, segresnet_image, unet_image, unetr_image], model)
         else:
             img = ensemble_function([ahnet_image, segresnet_image, unet_image, unetr_image])
@@ -174,6 +179,140 @@ def ensemble_inference(dataframe, ensemble_function, threshold = 0.5, include_la
             pred_paths.append([f'./outputs/Ensemble/pred_{model_name}/pred_{subject_id}_TC.npz', 
                                f'./outputs/Ensemble/pred_{model_name}/pred_{subject_id}_WT.npz',
                                f'./outputs/Ensemble/pred_{model_name}/pred_{subject_id}_ET.npz'])
+
+        # Discretizise
+        img = trans(img)
+        img_label = trans(img_label)
+
+        # Dice Metric
+        dice_metric(y_pred=img, y=img_label)
+        dice_score = dice_metric.aggregate()
+        dice_values.append(dice_score.item())
+        dice_metric.reset()
+            
+		# Batch Dice
+        dice_metric_batch(y_pred=img, y=img_label)
+        dice_batch = dice_metric_batch.aggregate()
+        dice_values_tc.append(dice_batch[0].item())
+        dice_values_wt.append(dice_batch[1].item())
+        dice_values_et.append(dice_batch[2].item())
+        dice_metric_batch.reset()     
+
+        # Biometrics
+        for j, channel in enumerate(channels):
+            # Image
+            props = regionprops(label(nib.Nifti1Image(img[0][j].cpu().numpy(), np.eye(4)).get_fdata()))
+            volumes = [prop.area * image_voxel_volume for prop in props]
+            pred_nm[channel].append(int(len(volumes)))
+            pred_v[channel].append(int(np.sum(volumes)))
+            # Label
+            props = regionprops(label(nib.Nifti1Image(img_label[0][j].cpu().numpy(), np.eye(4)).get_fdata()))
+            volumes = [prop.area * label_voxel_volume for prop in props]
+            gt_nm[channel].append(int(len(volumes)))
+            gt_v[channel].append(int(np.sum(volumes)))
+
+        # Subject ID
+        ids.append(subject_id)
+                
+    # Excel
+    df = pd.DataFrame({
+        'SubjectID': ids,
+		'Dice': dice_values,
+		'Dice TC': dice_values_tc,
+		'Dice WT': dice_values_wt,
+		'Dice ET': dice_values_et,
+		'Pred NM TC': pred_nm['TC'],
+		'Pred NM WT': pred_nm['WT'],
+		'Pred NM ET': pred_nm['ET'],
+		'GT NM TC': gt_nm['TC'],
+		'GT NM WT': gt_nm['WT'],
+		'GT NM ET': gt_nm['ET'],
+		'Pred V TC': pred_v['TC'],
+		'Pred V WT': pred_v['WT'],
+		'Pred V ET': pred_v['ET'],
+		'GT V TC': gt_v['TC'],
+		'GT V WT': gt_v['WT'],
+		'GT V ET': gt_v['ET'],
+	})
+    
+    if store_npz:
+        df['Pred Paths'] = pred_paths
+    
+    return df
+
+# Ensemble Inference Without UNet
+def ensemble_inference_nu(dataframe, ensemble_function, threshold = 0.5, model = None, store_npz = False, model_name = None):
+
+    # Transforms
+    trans = AsDiscrete(threshold=threshold)
+
+    # Dice Params
+    dice_values, dice_values_tc, dice_values_wt, dice_values_et = [], [], [], []
+    dice_metric = DiceMetric(include_background=True, reduction="mean")
+    dice_metric_batch = DiceMetric(include_background=True, reduction="mean_batch")
+
+    # Biometrics Params
+    ids = []
+    pred_paths = []
+    gt_nm, pred_nm = {'TC': [], 'WT': [], 'ET': []}, {'TC': [], 'WT': [], 'ET': []}
+    gt_v, pred_v = {'TC': [], 'WT': [], 'ET': []}, {'TC': [], 'WT': [], 'ET': []}
+
+    # Iterate over the dataframe
+    for i in range(len(dataframe)):
+
+        # Subject & Label
+        subject_id = dataframe['SubjectID'][i]
+        load_label = dataframe['GT'][i]
+        
+        # Images
+        load_ahnet = dataframe['AHNet'][i]
+        load_segresnet = dataframe['SegResNet'][i]
+        load_unetr = dataframe['UNETR'][i]
+        
+        # Params 
+        image_voxel_volume = np.prod((1,1,1))
+        label_voxel_volume = np.prod((1,1,1))
+
+        # Load Images and Labels
+        ahnet_image = [np.load(x)['arr_0'] for x in load_ahnet]
+        segresnet_image = [np.load(x)['arr_0'] for x in load_segresnet]
+        unetr_image = [np.load(x)['arr_0'] for x in load_unetr]
+        img_label = [np.load(x)['arr_0'] for x in load_label] 
+
+        # Pad 
+        if model is not None:
+            ahnet_image = [np.pad(x, ((0, max_size[0] - x.shape[0]), (0, max_size[1] - x.shape[1]), (0, max_size[2] - x.shape[2])), 'constant', constant_values=0) for x in ahnet_image]
+            segresnet_image = [np.pad(x, ((0, max_size[0] - x.shape[0]), (0, max_size[1] - x.shape[1]), (0, max_size[2] - x.shape[2])), 'constant', constant_values=0) for x in segresnet_image]
+            unetr_image = [np.pad(x, ((0, max_size[0] - x.shape[0]), (0, max_size[1] - x.shape[1]), (0, max_size[2] - x.shape[2])), 'constant', constant_values=0) for x in unetr_image]
+            img_label = [np.pad(x, ((0, max_size[0] - x.shape[0]), (0, max_size[1] - x.shape[1]), (0, max_size[2] - x.shape[2])), 'constant', constant_values=0) for x in img_label]
+
+        # To Tensor
+        ahnet_image = [torch.from_numpy(x) for x in ahnet_image]
+        segresnet_image = [torch.from_numpy(x) for x in segresnet_image]
+        unetr_image = [torch.from_numpy(x) for x in unetr_image]
+        img_label = [torch.from_numpy(x) for x in img_label]
+            
+        # Stack Images and Label
+        ahnet_image = torch.stack(ahnet_image, dim = 0).unsqueeze(0)
+        segresnet_image = torch.stack(segresnet_image, dim = 0).unsqueeze(0)
+        unetr_image = torch.stack(unetr_image, dim = 0).unsqueeze(0)
+        img_label = torch.stack(img_label, dim = 0).unsqueeze(0)
+
+        # Ensemble Function
+        img = None
+        if model is not None:
+            img = ensemble_function([ahnet_image, segresnet_image, unetr_image], model)
+        else:
+            img = ensemble_function([ahnet_image, segresnet_image, unetr_image])
+
+        # Save NPZ
+        if store_npz:
+            np.savez_compressed(f'./outputs/EnsembleNU/pred_{model_name}/pred_{subject_id}_TC.npz', img[0][0])
+            np.savez_compressed(f'./outputs/EnsembleNU/pred_{model_name}/pred_{subject_id}_WT.npz', img[0][1])
+            np.savez_compressed(f'./outputs/EnsembleNU/pred_{model_name}/pred_{subject_id}_ET.npz', img[0][2])
+            pred_paths.append([f'./outputs/EnsembleNU/pred_{model_name}/pred_{subject_id}_TC.npz', 
+                               f'./outputs/EnsembleNU/pred_{model_name}/pred_{subject_id}_WT.npz',
+                               f'./outputs/EnsembleNU/pred_{model_name}/pred_{subject_id}_ET.npz'])
 
         # Discretizise
         img = trans(img)
