@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from monai.networks.nets import SegResNet, UNet, AHNet, UNETR
 
 SEGRESNET = SegResNet(
@@ -49,3 +50,14 @@ class LogisticRegression(nn.Module):
     
     def forward(self, x):
         return torch.sigmoid(self.linear(x))
+    
+class Conv3D(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1):
+        super(Conv3D, self).__init__()
+        self.conv1 = nn.Conv3d(in_channels, 64, kernel_size, stride, padding)
+        self.conv2 = nn.Conv3d(64, out_channels, kernel_size, stride, padding)
+    
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = self.conv2(x)
+        return torch.sigmoid(x)

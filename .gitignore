@@ -10,4 +10,4 @@ gt_segs/
 pred_*/
 figures/
 *.onnx
-*.pth
+*.pt*

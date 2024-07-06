@@ -107,6 +107,42 @@ class Transforms():
             AsDiscrete(threshold=0.5),
             ]
         )
+    
+    def train_ensemble(self, spatial_size):
+            
+        crop = RandSpatialCropd(keys=["image", "label"], roi_size=[240, 240, 160], random_size=False)
+        crop.set_random_state(self.seed)
+        self.flip_0.set_random_state(self.seed)
+        self.flip_1.set_random_state(self.seed)
+
+        return Compose(
+            [
+            Spacingd(
+                    keys=["image", "label"],
+                    pixdim=(1.0, 1.0, 1.0),
+                    mode=("bilinear", "nearest")
+                    ),
+            crop,
+            ResizeWithPadOrCropd(keys=["image", "label"], spatial_size=spatial_size),
+            self.flip_0,
+            self.flip_1,
+            ]
+        )
+    
+    def val_ensemble(self):
+        self.flip_0.set_random_state(self.seed)
+        self.flip_1.set_random_state(self.seed)
+        return Compose(
+            [
+            Spacingd(
+                keys=["image", "label"],
+                pixdim=(1.0, 1.0, 1.0),
+                mode=("bilinear", "nearest"),
+            ),
+            self.flip_0,
+            self.flip_1,
+            ]
+        )
 
 # To MNI Space 
 def mni_transform(img):
