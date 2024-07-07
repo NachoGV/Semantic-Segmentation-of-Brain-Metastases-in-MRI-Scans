@@ -10,6 +10,7 @@ from monai.metrics import DiceMetric
 from monai.utils import set_determinism
 from monai.inferers import sliding_window_inference
 from skimage.measure import regionprops, label
+import torch.nn.functional as F
 from monai.transforms import Activations, AsDiscrete
 
 # Parameters
@@ -19,6 +20,8 @@ transforms = Transforms(seed)
 channels = ['TC', 'WT', 'ET']  
 image_voxel_volume = np.prod((1,1,1))
 label_voxel_volume = np.prod((1,1,1))
+transforms = Transforms(seed)
+tta_trans = transforms.tta_ensemble()
 
 # Configurations
 def config():
@@ -344,7 +347,7 @@ def ensemble_inference_nu(dataframe, ensemble_function, threshold = 0.5, store_n
     
     return df
 
-def model_ensemble_inference(subjects, loader, model, spatial_size, threshold = 0.5, store_npz = False, model_name = None, include_unet = True):
+def model_ensemble_inference(subjects, loader, model, spatial_size, threshold = 0.5, store_npz = False, model_name = None, include_unet = True, tta = False):
 
     # Transforms
     trans = AsDiscrete(threshold=threshold)
@@ -362,18 +365,37 @@ def model_ensemble_inference(subjects, loader, model, spatial_size, threshold = 
 
     # Inference
     for data, subject_id in zip(loader, subjects):
-        
-        # Load
-        images, target, og_shape = data   
 
-        # Predict 
-        outputs = inference(images, spatial_size, model, VAL_AMP=False)
-        img = trans(outputs).squeeze(0)
-        target = target.squeeze(0) 
-                
-        # To OG Shape
-        img = img.mT.reshape(1, og_shape[0], og_shape[1], og_shape[2], og_shape[3])
-        target = target.mT.reshape(1, og_shape[0], og_shape[1], og_shape[2], og_shape[3])
+        # TTA
+        img = None
+        target = None
+        if tta:
+            images, target, og_shape = data
+            target = target.mT.reshape(1, og_shape[0], og_shape[1], og_shape[2], og_shape[3])
+
+            outputs = []
+            for image, t in zip(images, tta_trans):
+                output = inference(image, spatial_size, model, VAL_AMP=False)
+                # To OG Shape
+                output = output.mT.reshape(1, og_shape[0], og_shape[1], og_shape[2], og_shape[3]).squeeze(0)
+                # Invert Transform
+                output = t.inverse({'image':output})
+                outputs.append(output['image'])
+            
+            img = torch.stack(outputs, dim = 0).mean(dim = 0).unsqueeze(0)
+            
+        # NOT TTA
+        else:
+            images, target, og_shape = data  
+
+            # Predict
+            outputs = inference(images, spatial_size, model, VAL_AMP=False)
+            img = trans(outputs).squeeze(0)
+            target = target.squeeze(0) 
+
+            # To OG Shape
+            img = img.mT.reshape(1, og_shape[0], og_shape[1], og_shape[2], og_shape[3])
+            target = target.mT.reshape(1, og_shape[0], og_shape[1], og_shape[2], og_shape[3])
 
         # Save NPZ
         if store_npz:
@@ -391,6 +413,9 @@ def model_ensemble_inference(subjects, loader, model, spatial_size, threshold = 
                 pred_paths.append([f'./outputs/EnsembleNU/pred_{model_name}/pred_{subject_id}_TC.npz', 
                                 f'./outputs/EnsembleNU/pred_{model_name}/pred_{subject_id}_WT.npz',
                                 f'./outputs/EnsembleNU/pred_{model_name}/pred_{subject_id}_ET.npz'])
+
+        # Discretizise
+        img = trans(img)
 
         # Dice Metric
         dice_metric(y_pred=img, y=target)

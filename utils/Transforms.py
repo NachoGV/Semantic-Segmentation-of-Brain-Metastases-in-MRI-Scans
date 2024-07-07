@@ -7,6 +7,7 @@ from nilearn.datasets import load_mni152_template
 from monai.transforms import (
     Compose,
     Spacingd,
+    Zoomd,
     RandFlipd,
     LoadImaged,
     AsDiscrete,
@@ -130,8 +131,6 @@ class Transforms():
         )
     
     def val_ensemble(self):
-        self.flip_0.set_random_state(self.seed)
-        self.flip_1.set_random_state(self.seed)
         return Compose(
             [
             Spacingd(
@@ -139,10 +138,21 @@ class Transforms():
                 pixdim=(1.0, 1.0, 1.0),
                 mode=("bilinear", "nearest"),
             ),
-            self.flip_0,
-            self.flip_1,
             ]
         )
+    
+    def tta_ensemble(self):
+        return [Compose([Spacingd(keys=["image", "label"],pixdim=(1.0, 1.0, 1.0),mode=("bilinear", "nearest"),allow_missing_keys=True,),
+                        RandFlipd(keys=["image", "label"], prob=1, spatial_axis=1, allow_missing_keys=True),],),
+                ##############
+                Compose([Spacingd(keys=["image", "label"],pixdim=(1.0, 1.0, 1.0),mode=("bilinear", "nearest"),allow_missing_keys=True,),
+                        RandFlipd(keys=["image", "label"], prob=1, spatial_axis=0, allow_missing_keys=True),
+                        Zoomd(keys=["image", "label"], prob=1, zoom=1.2, mode=("bilinear", "nearest"), allow_missing_keys=True, keep_size=True),],),
+                ##############
+                Compose([Spacingd(keys=["image", "label"],pixdim=(1.0, 1.0, 1.0),mode=("bilinear", "nearest"),allow_missing_keys=True,),
+                        Zoomd(keys=["image", "label"], prob=1, zoom=1.4, mode=("bilinear", "nearest"),allow_missing_keys=True, keep_size=True),],),
+                ##############
+                ]
 
 # To MNI Space 
 def mni_transform(img):
