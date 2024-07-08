@@ -111,7 +111,7 @@ class Transforms():
     
     def train_ensemble(self, spatial_size):
             
-        crop = RandSpatialCropd(keys=["image", "label"], roi_size=[240, 240, 160], random_size=False)
+        crop = RandSpatialCropd(keys=["image", "label"], roi_size=[100, 100, 50], random_size=False)
         crop.set_random_state(self.seed)
         self.flip_0.set_random_state(self.seed)
         self.flip_1.set_random_state(self.seed)
@@ -124,6 +124,7 @@ class Transforms():
                     mode=("bilinear", "nearest")
                     ),
             crop,
+            Zoomd(keys=["image", "label"], prob=0.5, zoom=1.4, mode=("bilinear", "nearest"), keep_size=True),
             ResizeWithPadOrCropd(keys=["image", "label"], spatial_size=spatial_size),
             self.flip_0,
             self.flip_1,
