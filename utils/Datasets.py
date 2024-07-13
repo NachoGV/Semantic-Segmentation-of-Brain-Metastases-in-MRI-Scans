@@ -23,11 +23,10 @@ class UCSF_Dataset(CacheDataset):
     
 # Custom Ensemble Dataset
 class EnsembleDataset(CacheDataset):
-    def __init__(self, images, transform = None, size = None, include_unet = True, model_name = 'logreg', tta = False):
+    def __init__(self, images, transform = None, size = None, include_models = [True, True, True, True], tta = False):
         self.images = images
         self.transform = transform 
-        self.include_unet = include_unet
-        self.model_name = model_name
+        self.include_models = include_models
         self.tta = tta
 
         if size is not None:
@@ -80,11 +79,15 @@ class EnsembleDataset(CacheDataset):
                 unetr_image.append(t_imgs[9:12])
             images = []
             for i in range(len(ahnet_image)):
-                imgs_i = None
-                if self.include_unet:
-                    imgs_i = [ahnet_image[i], segresnet_image[i], unet_image[i], unetr_image[i]]
-                else:
-                    imgs_i = [ahnet_image[i], segresnet_image[i], unetr_image[i]]
+                imgs_i = []
+                if self.include_models[0]:
+                    imgs_i.append(ahnet_image[i])
+                if self.include_models[1]:
+                    imgs_i.append(segresnet_image[i])
+                if self.include_models[2]:
+                    imgs_i.append(unet_image[i])
+                if self.include_models[3]:
+                    imgs_i.append(unetr_image[i])
                 # Flatten
                 if self.model_name == 'logreg':
                     imgs_i = [x.contiguous().view(3, -1).t() for x in imgs_i]
@@ -116,21 +119,19 @@ class EnsembleDataset(CacheDataset):
 
                 # Images
                 images = []
-                if not self.include_unet:
-                    images = [ahnet_image, segresnet_image, unetr_image]
-                else:
-                    images = [ahnet_image, segresnet_image, unet_image, unetr_image]
+                if self.include_models[0]:
+                    images.append(ahnet_image)
+                if self.include_models[1]:
+                    images.append(segresnet_image)
+                if self.include_models[2]:
+                    images.append(unet_image)
+                if self.include_models[3]:
+                    images.append(unetr_image)
                     
                 # Flatten
-                if self.model_name == 'logreg':
-                    images = [x.contiguous().view(3, -1).t() for x in images]
-                    images = torch.cat(images, dim=1)
-                    img_label = img_label.contiguous().view(3, -1).t()
-                elif self.model_name == 'conv3d':
-                    images = torch.cat(images, dim=0)
-                else:
-                    print('Invalid Model Name')
-                    return None
+                images = [x.contiguous().view(3, -1).t() for x in images]
+                images = torch.cat(images, dim=1)
+                img_label = img_label.contiguous().view(3, -1).t()
                 
                 return images, img_label, og_shape
         
